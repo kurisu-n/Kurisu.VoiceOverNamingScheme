@@ -26,6 +26,11 @@ namespace Kurisu.VoiceOverTools
             public string DisplayLine { get; set; }
             public bool HasDisplayLine { get; set; }
             public int CategoryKey { get; set; }
+            // Informational: this entry's VO asset is bound to >1 distinct DialogueFragment.
+            // The XAML data-trigger uses this to tint the row background; the rename pass
+            // itself doesn't behave any differently — the user gets a separate confirmation
+            // dialog before any actionable multi-bound entries are processed.
+            public bool IsMultiBound { get; set; }
         }
 
         public ActionChoice SelectedAction { get; private set; } = ActionChoice.DryRun;
@@ -38,6 +43,8 @@ namespace Kurisu.VoiceOverTools
         // AlreadyCorrect (0) is off by default — most entries usually fall here after a
         // successful rename pass, and users want to see what's actionable.
         private readonly HashSet<int> _visibleCategories = new() { 1, 2, 3, 4 };
+        // Multi-bound rows are visible by default; toggling the pill off hides them.
+        private bool _includeMultiBound = true;
         private int _totalCount;
 
         public VoiceOverRenameWindow()
@@ -62,6 +69,7 @@ namespace Kurisu.VoiceOverTools
             int displayOnly,
             int targetExists,
             int sourceMissing,
+            int multiBound,
             Action<int> onNavigateFragment,
             Action<int> onNavigateAsset)
         {
@@ -77,6 +85,7 @@ namespace Kurisu.VoiceOverTools
             DisplayOnlyCount.Text = displayOnly.ToString();
             TargetExistsCount.Text = targetExists.ToString();
             SourceMissingCount.Text = sourceMissing.ToString();
+            MultiBoundCount.Text = multiBound.ToString();
 
             ApplyFilter();
 
@@ -98,9 +107,17 @@ namespace Kurisu.VoiceOverTools
             ApplyFilter();
         }
 
+        private void MultiBoundFilter_Click(object sender, RoutedEventArgs e)
+        {
+            _includeMultiBound = MultiBoundToggle.IsChecked == true;
+            ApplyFilter();
+        }
+
         private void ApplyFilter()
         {
-            var filtered = _allRows.Where(r => _visibleCategories.Contains(r.CategoryKey)).ToList();
+            IEnumerable<Row> filteredEnum = _allRows.Where(r => _visibleCategories.Contains(r.CategoryKey));
+            if (!_includeMultiBound) filteredEnum = filteredEnum.Where(r => !r.IsMultiBound);
+            var filtered = filteredEnum.ToList();
             PlanListBox.ItemsSource = filtered;
 
             if (filtered.Count == _totalCount)

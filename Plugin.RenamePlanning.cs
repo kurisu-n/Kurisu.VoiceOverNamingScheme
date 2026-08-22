@@ -32,6 +32,7 @@ namespace Kurisu.VoiceOverTools
             public string PlannedDisplayName;
             public string SourcePath;
             public RenameCategory Category;
+            public bool IsMultiBound;
         }
 
         private void RunRenamePlanner(IReadOnlyList<ObjectProxy> fragments, string scopeLabel)
@@ -51,6 +52,7 @@ namespace Kurisu.VoiceOverTools
             int displayOnly    = plan.Count(p => p.Category == RenameCategory.DisplayOnly);
             int targetExists   = plan.Count(p => p.Category == RenameCategory.TargetExists);
             int sourceMissing  = plan.Count(p => p.Category == RenameCategory.SourceMissing);
+            int multiBound     = plan.Count(p => p.IsMultiBound);
 
             var rows = plan.Select(BuildRow).ToList();
 
@@ -63,7 +65,7 @@ namespace Kurisu.VoiceOverTools
             window.Populate(
                 scopeSummary,
                 rows,
-                alreadyCorrect, willRename, displayOnly, targetExists, sourceMissing,
+                alreadyCorrect, willRename, displayOnly, targetExists, sourceMissing, multiBound,
                 onNavigateFragment: idx => NavigateToObject(plan[idx].Fragment),
                 onNavigateAsset:    idx => NavigateToObject(plan[idx].Asset));
 
@@ -81,6 +83,21 @@ namespace Kurisu.VoiceOverTools
                     $"Target exists:      {targetExists}\n" +
                     $"Source missing:     {sourceMissing}");
                 return;
+            }
+
+            // Pre-execute warning: if the actionable plan contains any multi-bound VO assets,
+            // surface the failure mode before we mutate anything. The rename pass renames
+            // assets in place — when N fragments share an asset, each pass overwrites the
+            // file's name + display + ExternalId based on the *processing* fragment, so the
+            // last one to be touched wins and every other fragment ends up referencing an
+            // asset whose metadata reflects a different fragment than its own.
+            int actionableMultiBound = plan.Count(p =>
+                p.IsMultiBound &&
+                (p.Category == RenameCategory.WillRename || p.Category == RenameCategory.DisplayOnly));
+
+            if (actionableMultiBound > 0)
+            {
+                if (!ConfirmMultiBoundRename(actionableMultiBound)) return;
             }
 
             int executedRenames = 0;
@@ -114,12 +131,78 @@ namespace Kurisu.VoiceOverTools
                 $"{alreadyCorrect + targetExists + sourceMissing}");
         }
 
+        private static bool ConfirmMultiBoundRename(int actionableCount)
+        {
+            var message =
+                $"Heads up — {actionableCount} of the planned renames target voice-over " +
+                $"assets that are bound to MORE THAN ONE DialogueFragment.\n\n" +
+                $"The rename pass renames each asset's file in place and rewrites its display " +
+                $"name and External ID per the *processing* fragment. When several fragments " +
+                $"share one asset, the last fragment to be processed wins — every other " +
+                $"fragment ends up pointing at an asset whose filename, display, and " +
+                $"External ID reflect a different fragment. Effectively, this clobbers the " +
+                $"naming for every fragment except the last.\n\n" +
+                $"Recommended: cancel and run \"Find Multi-bound Voice-Overs\" first to " +
+                $"clean up the overlaps (split or unbind), then re-run the rename.\n\n" +
+                $"Proceed anyway?";
+
+            var result = System.Windows.MessageBox.Show(
+                message,
+                "Confirm rename of multi-bound VOs",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No);
+
+            return result == System.Windows.MessageBoxResult.Yes;
+        }
+
+        // Computes the set of asset.Id values that are bound to two or more distinct
+        // DialogueFragments project-wide (not limited to the rename scope). Multi-binding
+        // is a property of the asset's full reference graph — fragments outside the rename
+        // selection still share the same on-disk file, and the rename mutates that file.
+        private HashSet<ulong> ComputeMultiBoundAssetIds()
+        {
+            var result = new HashSet<ulong>();
+            var voLanguages = Session.GetVoiceOverLanguages();
+            if (voLanguages == null || voLanguages.Count == 0) return result;
+
+            var allFragments = CollectAllDialogueFragments();
+            var assetFragmentSet = new Dictionary<ulong, HashSet<ulong>>();
+
+            foreach (var fragment in allFragments)
+            {
+                if (fragment == null || fragment.ObjectType != ObjectType.DialogueFragment) continue;
+                foreach (var (_, text) in EnumerateVoiceOverTextProxies(fragment))
+                {
+                    foreach (var lang in voLanguages)
+                    {
+                        var culture = lang.CultureName;
+                        if (string.IsNullOrEmpty(culture)) continue;
+                        var asset = text.VoiceOverReferences[culture];
+                        if (asset == null || !asset.IsValid || asset.ObjectType != ObjectType.Asset) continue;
+                        if (!assetFragmentSet.TryGetValue(asset.Id, out var fragSet))
+                            assetFragmentSet[asset.Id] = fragSet = new HashSet<ulong>();
+                        fragSet.Add(fragment.Id);
+                    }
+                }
+            }
+
+            foreach (var kvp in assetFragmentSet)
+                if (kvp.Value.Count >= 2) result.Add(kvp.Key);
+
+            return result;
+        }
+
         private List<RenamePlanEntry> BuildRenamePlan(IReadOnlyList<ObjectProxy> fragments)
         {
             var plan = new List<RenamePlanEntry>();
 
             var voLanguages = Session.GetVoiceOverLanguages();
             if (voLanguages == null || voLanguages.Count == 0) return plan;
+
+            // Project-wide multi-bound asset detection. Done once up front so each plan entry
+            // can be tagged in O(1) below.
+            var multiBoundAssets = ComputeMultiBoundAssetIds();
 
             foreach (var fragment in fragments)
             {
@@ -192,7 +275,8 @@ namespace Kurisu.VoiceOverTools
                             CurrentDisplayName = currentDisplay,
                             PlannedDisplayName = plannedDisplay,
                             SourcePath = srcPath,
-                            Category = cat
+                            Category = cat,
+                            IsMultiBound = multiBoundAssets.Contains(asset.Id)
                         });
                     }
                 }
@@ -276,7 +360,8 @@ namespace Kurisu.VoiceOverTools
                 DisplayLine = displayLine,
                 HasFileLine = hasFileLine,
                 HasDisplayLine = hasDisplayLine,
-                CategoryKey = (int)entry.Category
+                CategoryKey = (int)entry.Category,
+                IsMultiBound = entry.IsMultiBound
             };
         }
 

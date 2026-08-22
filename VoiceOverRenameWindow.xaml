@@ -15,6 +15,9 @@
                 <ResourceDictionary Source="pack://application:,,,/Kurisu.VoiceOverTools;component/Resources/ArticyTheme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+            <!-- Tinted row background for multi-bound entries (DangerColor at ~20% alpha) —
+                 visible enough to spot in a list, not loud enough to drown out the row content. -->
+            <SolidColorBrush x:Key="MultiBoundRowBgBrush" Color="#33E06050"/>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -46,6 +49,7 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
@@ -123,7 +127,23 @@
                     </StackPanel>
                 </ToggleButton>
 
-                <TextBlock Grid.Row="1" Grid.ColumnSpan="5"
+                <!-- Multi-bound: orthogonal informational filter. Toggle off to hide rows whose
+                     VO asset is bound to >1 distinct DialogueFragment; rows highlight regardless. -->
+                <ToggleButton Grid.Row="0" Grid.Column="5"
+                              x:Name="MultiBoundToggle"
+                              Style="{DynamicResource CategoryToggleStyle}"
+                              IsChecked="True"
+                              Click="MultiBoundFilter_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#x21C4;" Foreground="{DynamicResource DangerBrush}" FontFamily="Consolas" FontSize="14" FontWeight="Bold" Margin="0,0,6,0"/>
+                        <StackPanel>
+                            <TextBlock x:Name="MultiBoundCount" Text="0" FontWeight="Bold"/>
+                            <TextBlock Text="Multi-bound" Style="{DynamicResource HintTextStyle}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ToggleButton>
+
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="6"
                            x:Name="FilterStatusTextBlock"
                            Style="{DynamicResource HintTextStyle}"
                            Text="Click a category to toggle it on/off."
@@ -165,6 +185,17 @@
                      SelectionChanged="PlanListBox_SelectionChanged">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
+                        <Border Padding="2,1">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsMultiBound}" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource MultiBoundRowBgBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                         <StackPanel Margin="0,2,0,4">
                             <!-- Header row -->
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
@@ -218,6 +249,7 @@
                                            TextWrapping="Wrap"/>
                             </Grid>
                         </StackPanel>
+                        </Border>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>

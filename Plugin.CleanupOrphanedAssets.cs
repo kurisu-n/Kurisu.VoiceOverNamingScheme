@@ -236,9 +236,42 @@ namespace Kurisu.VoiceOverTools
 
         private void ShowReport(string title, string message)
         {
+            // Drain pending dispatcher work before opening the report.
+            //
+            // Why: Session.ChangeAsset (used by the rename pass) ends up in
+            // AssetManager.ReimportAssetsWithUserNotification, which when running interactively
+            // without a custom progress handler creates its own ProgressDialogWrapper and shows
+            // it. The async worker closes that dialog on completion via a UI-thread-queued event.
+            //
+            // Session.WaitForAssetProcessing waits for assets to be clean but does NOT guarantee
+            // those queued progress-dialog close events have fired. If we call ShowDialog while
+            // a progress dialog is still in the visual tree and holds keyboard focus, Articy's
+            // MessageBoxEx.GetTargetWindow() returns the dying progress dialog as our Owner —
+            // when it finishes closing, WPF closes our owned report with it, and Articy's
+            // modal-stack accounting gets scrambled, leaving the UI in a stuck-modal state.
+            //
+            // Invoke at ApplicationIdle drains every higher-priority queued item (including the
+            // progress-dialog close) before returning, so by the time we ask for GetTargetWindow
+            // the focus has settled back on the main Articy window.
+            DrainDispatcher();
+
             var msg = new MessageWindow { Title = title };
             msg.MessageTextBlock.Text = message;
             Session.ShowDialog(msg);
+        }
+
+        private static void DrainDispatcher()
+        {
+            var app = System.Windows.Application.Current;
+            if (app == null) return;
+            try
+            {
+                app.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            }
+            catch
+            {
+                // Non-fatal — worst case the report inherits a slightly stale owner.
+            }
         }
 
         private void NavigateToAsset(ObjectProxy asset)

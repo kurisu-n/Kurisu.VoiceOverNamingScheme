@@ -98,6 +98,20 @@ namespace Kurisu.VoiceOverTools
                 Execute      = AuditVoiceOvers
             };
 
+            var findDuplicateTranslations = new MacroCommandDescriptor
+            {
+                CaptionLid   = MenuPrefix + "Find Duplicate Translations",
+                ModifiesData = true,
+                Execute      = FindDuplicateTranslations
+            };
+
+            var findMultiBoundVoiceOvers = new MacroCommandDescriptor
+            {
+                CaptionLid   = MenuPrefix + "Find Multi-bound Voice-Overs",
+                ModifiesData = true,
+                Execute      = FindMultiBoundVoiceOvers
+            };
+
             switch ( aContext )
             {
                 case ContextMenuContext.Global:
@@ -106,6 +120,8 @@ namespace Kurisu.VoiceOverTools
                     result.Add(renameAllVoiceOvers);
                     result.Add(cleanUpOrphanedAudioAssets);
                     result.Add(auditVoiceOvers);
+                    result.Add(findDuplicateTranslations);
+                    result.Add(findMultiBoundVoiceOvers);
                     return result;
 
                 default:
